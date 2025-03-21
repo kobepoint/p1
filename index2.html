@@ -1,0 +1,2348 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PDF編集・出力ソリューション（複数ページ対応版）</title>
+    
+    <!-- ライブラリの読み込み順序を明示的に指定し、依存関係を考慮 -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
+    <script>
+        // jQueryが読み込まれたことを確認
+        if (typeof $ === 'undefined') {
+            console.error('jQuery が読み込まれていません');
+            alert('ライブラリの読み込みに失敗しました。ページを再読み込みしてください。');
+        }
+    </script>
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.1/fabric.min.js"></script>
+    <script>
+        // Fabric.jsが読み込まれたことを確認
+        if (typeof fabric === 'undefined') {
+            console.error('Fabric.js が読み込まれていません');
+            alert('ライブラリの読み込みに失敗しました。ページを再読み込みしてください。');
+        }
+    </script>
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js"></script>
+    <script>
+        // PDF.jsが読み込まれたことを確認
+        if (typeof pdfjsLib === 'undefined') {
+            console.error('PDF.js が読み込まれていません');
+            alert('ライブラリの読み込みに失敗しました。ページを再読み込みしてください。');
+        } else {
+            // ワーカーの設定を確実に行う
+            pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
+        }
+    </script>
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
+    <script>
+        // PDF-Libが読み込まれたことを確認
+        if (typeof PDFLib === 'undefined') {
+            console.error('PDF-Lib が読み込まれていません');
+            alert('ライブラリの読み込みに失敗しました。ページを再読み込みしてください。');
+        }
+    </script>
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+    <script>
+        // FileSaverが読み込まれたことを確認
+        if (typeof saveAs === 'undefined') {
+            console.error('FileSaver.js が読み込まれていません');
+            alert('ライブラリの読み込みに失敗しました。ページを再読み込みしてください。');
+        }
+    </script>
+
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #f5f5f5;
+        }
+        .container {
+            display: flex;
+            height: 100vh;
+        }
+        .toolbar {
+            width: 250px;
+            background-color: #fff;
+            border-right: 1px solid #ddd;
+            padding: 15px;
+            box-shadow: 2px 0 5px rgba(0,0,0,0.1);
+            overflow-y: auto;
+            z-index: 10;
+        }
+        .editor-container {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        .canvas-area {
+            flex: 1;
+            overflow: auto;
+            background-color: #e0e0e0;
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+            padding: 20px;
+        }
+        .editor-wrapper {
+            position: relative;
+            background-color: white;
+            border: 1px solid #ccc;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+            margin: 0 auto;
+            transition: transform 0.2s ease-in-out;
+        }
+        .pdf-placeholder {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background-color: #f8f8f8;
+            color: #666;
+            z-index: 1;
+            text-align: center;
+            padding: 20px;
+            box-sizing: border-box;
+            writing-mode: horizontal-tb; /* 横書きを強制 */
+        }
+        .pdf-display {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: white;
+            z-index: 2;
+        }
+        #pdf-image {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 2;
+        }
+        .canvas-container {
+            position: absolute !important;
+            top: 0 !important;
+            left: 0 !important;
+            width: 100% !important;
+            height: 100% !important;
+            z-index: 3 !important;
+        }
+        .editor-controls {
+            padding: 10px;
+            background-color: #f0f0f0;
+            border-bottom: 1px solid #ddd;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        .tool-section {
+            margin-bottom: 20px;
+            border-bottom: 1px solid #eee;
+            padding-bottom: 15px;
+        }
+        .tool-section h3 {
+            margin-top: 0;
+            margin-bottom: 10px;
+            font-size: 16px;
+            color: #555;
+        }
+        .tool-button {
+            display: block;
+            width: 100%;
+            padding: 8px 12px;
+            margin-bottom: 8px;
+            background-color: #f8f8f8;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            cursor: pointer;
+            text-align: left;
+            transition: all 0.2s;
+        }
+        .tool-button:hover {
+            background-color: #e9f5ff;
+            border-color: #2196F3;
+        }
+        .tool-button.active {
+            background-color: #2196F3;
+            color: white;
+            border-color: #0b7dda;
+        }
+        .upload-container {
+            padding: 15px;
+            border: 2px dashed #ccc;
+            border-radius: 5px;
+            text-align: center;
+            margin-bottom: 15px;
+            transition: all 0.2s;
+        }
+        .upload-container:hover {
+            border-color: #2196F3;
+            background-color: #f0f7ff;
+        }
+        .btn {
+            padding: 6px 12px;
+            background-color: #2196F3;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: background-color 0.2s;
+            margin-right: 5px;
+        }
+        .btn:hover {
+            background-color: #0b7dda;
+        }
+        .btn-secondary {
+            background-color: #f0f0f0;
+            color: #333;
+            border: 1px solid #ddd;
+        }
+        .btn-secondary:hover {
+            background-color: #e0e0e0;
+        }
+        .btn:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+        .btn-secondary:disabled {
+            background-color: #f0f0f0;
+            color: #999;
+        }
+        .properties-panel {
+            margin-top: 20px;
+            padding: 10px;
+            background-color: #f8f8f8;
+            border-radius: 4px;
+            display: none;
+        }
+        .properties-panel label {
+            display: block;
+            margin-bottom: 5px;
+            font-size: 12px;
+            color: #666;
+        }
+        .properties-panel input, .properties-panel select {
+            width: 100%;
+            padding: 6px;
+            margin-bottom: 10px;
+            border: 1px solid #ddd;
+            border-radius: 3px;
+        }
+        .field-list {
+            margin-top: 15px;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+        .field-item {
+            padding: 8px;
+            border-bottom: 1px solid #eee;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .field-item:hover {
+            background-color: #f0f7ff;
+        }
+        .field-delete {
+            color: #d9534f;
+            cursor: pointer;
+            margin-left: 10px;
+            font-size: 16px;
+        }
+        .loading-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+        .loading-spinner {
+            border: 5px solid #f3f3f3;
+            border-top: 5px solid #3498db;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 2s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .error-message {
+            color: #d9534f;
+            background-color: #f2dede;
+            border: 1px solid #ebccd1;
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 4px;
+            display: none;
+            font-size: 14px;
+        }
+        /* 拡大縮小コントロール用のスタイル */
+        .zoom-controls {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        #zoom-level {
+            min-width: 60px;
+            text-align: center;
+            user-select: none;
+        }
+        .zoom-btn {
+            width: 30px;
+            height: 30px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            font-size: 16px;
+        }
+        /* アップロードヘルプテキスト */
+        .upload-help {
+            font-size: 12px;
+            color: #666;
+            margin-top: 10px;
+        }
+        /* フィールド配置モード */
+        .placement-mode {
+            cursor: cell !important;
+        }
+        .placement-mode-notice {
+            background-color: #ffecb3;
+            color: #856404;
+            padding: 8px;
+            border-radius: 4px;
+            margin-bottom: 10px;
+            font-size: 14px;
+            text-align: center;
+            display: none;
+        }
+        /* ダブルクリックツールチップ */
+        .tooltip {
+            position: absolute;
+            background-color: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 5px 10px;
+            border-radius: 4px;
+            font-size: 12px;
+            pointer-events: none;
+            z-index: 1000;
+            display: none;
+        }
+        /* 座標表示 */
+        .coordinates-display {
+            position: fixed;
+            bottom: 10px;
+            left: 10px;
+            background-color: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 5px 10px;
+            border-radius: 4px;
+            font-size: 12px;
+            z-index: 999;
+            display: none;
+        }
+        /* ページナビゲーション */
+        .page-navigation {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        #page-display {
+            min-width: 60px;
+            text-align: center;
+            user-select: none;
+        }
+        .page-btn {
+            width: 30px;
+            height: 30px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            font-size: 16px;
+        }
+        /* データ操作ボタングループ */
+        .data-controls {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 5px;
+        }
+        /* グリッドガイド */
+        .grid-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 5;
+            opacity: 0.5;
+            display: none;
+        }
+        .grid-line-h, .grid-line-v {
+            position: absolute;
+            background-color: rgba(0, 128, 255, 0.3);
+        }
+        .grid-line-h {
+            height: 1px;
+            width: 100%;
+        }
+        .grid-line-v {
+            width: 1px;
+            height: 100%;
+        }
+        /* 位置情報表示 */
+        .position-info {
+            position: fixed;
+            bottom: 10px;
+            right: 10px;
+            background-color: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 5px 10px;
+            border-radius: 4px;
+            font-size: 12px;
+            z-index: 999;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="toolbar">
+            <div class="tool-section">
+                <div class="upload-container">
+                    <input type="file" id="pdf-upload" accept=".pdf" style="display: none;">
+                    <button id="upload-btn" class="btn">PDFをアップロード</button>
+                    <p id="filename-display" class="upload-help"></p>
+                </div>
+                <div id="error-message" class="error-message"></div>
+            </div>
+            
+            <div class="tool-section">
+                <h3>フォーム要素</h3>
+                <div id="placement-mode-notice" class="placement-mode-notice">ダブルクリックで要素を配置</div>
+                <button class="tool-button" data-tool="text">
+                    <span>📝</span> テキスト入力
+                </button>
+                <button class="tool-button" data-tool="checkbox">
+                    <span>✓</span> チェックマーク
+                </button>
+                <button class="tool-button" data-tool="x-mark">
+                    <span>✗</span> バツマーク
+                </button>
+                <button class="tool-button" data-tool="dot">
+                    <span>•</span> 点
+                </button>
+                <button class="tool-button" data-tool="circle">
+                    <span>⭘</span> 丸で囲む
+                </button>
+                <button class="tool-button" data-tool="strikethrough">
+                    <span>-</span> 取り消し線
+                </button>
+            </div>
+            
+            <div class="tool-section">
+                <h3>フィールド管理</h3>
+                <button id="delete-field-btn" class="btn btn-secondary">
+                    選択したフィールドを削除
+                </button>
+                <button id="toggle-grid-btn" class="btn btn-secondary">
+                    グリッド表示
+                </button>
+                <div class="field-list" id="field-list">
+                    <!-- フィールドリストが動的に生成されます -->
+                </div>
+            </div>
+            
+            <div class="properties-panel" id="properties-panel">
+                <h3>プロパティ</h3>
+                <div id="text-properties">
+                    <label>テキスト:</label>
+                    <input type="text" id="field-text" />
+                    
+                    <label>フォントサイズ:</label>
+                    <input type="number" id="field-font-size" min="8" max="72" value="14" />
+                    
+                    <label>フォントスタイル:</label>
+                    <select id="field-font-style">
+                        <option value="normal">標準</option>
+                        <option value="bold">太字</option>
+                        <option value="italic">斜体</option>
+                    </select>
+                    
+                    <div id="position-controls">
+                        <label>X座標:</label>
+                        <input type="number" id="field-x" step="1" />
+                        
+                        <label>Y座標:</label>
+                        <input type="number" id="field-y" step="1" />
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="editor-container">
+            <div class="editor-controls">
+                <div class="data-controls">
+                    <button id="save-pdf-btn" class="btn" disabled>編集済みPDFを保存</button>
+                    <button id="save-data-btn" class="btn" disabled>編集データを保存</button>
+                    <button id="load-data-btn" class="btn" disabled>編集データを読み込み</button>
+                </div>
+                <div class="page-navigation">
+                    <button id="prev-page" class="btn btn-secondary page-btn" disabled>&lt;</button>
+                    <span id="page-display">1 / 1</span>
+                    <button id="next-page" class="btn btn-secondary page-btn" disabled>&gt;</button>
+                </div>
+                <div class="zoom-controls">
+                    <button id="zoom-out" class="btn btn-secondary zoom-btn">-</button>
+                    <span id="zoom-level">100%</span>
+                    <button id="zoom-in" class="btn btn-secondary zoom-btn">+</button>
+                </div>
+            </div>
+            
+            <div class="canvas-area">
+                <div id="upload-message" style="text-align: center; margin: 20px 0; display: block;">
+                    <p>PDFをアップロードしてください</p>
+                </div>
+                <div class="editor-wrapper" style="display: none;">
+                    <div class="pdf-display"></div>
+                    <div class="grid-overlay" id="grid-overlay"></div>
+                </div>
+            </div>
+            
+            <div class="position-info" id="position-info" style="display: none;">座標: (0, 0)</div>
+        </div>
+    </div>
+    
+    <div id="tooltip" class="tooltip">ダブルクリックで配置</div>
+    
+    <div class="loading-overlay" id="loading-overlay" style="display: none;">
+        <div class="loading-spinner"></div>
+    </div>
+
+    <script>
+        // アプリケーション状態
+        const app = {
+            pdfFile: null,
+            pdfDoc: null,
+            pdfPages: null,            // PDF.jsのページオブジェクト
+            fabricCanvas: null,
+            fields: {},                // ページごとのフィールドを保存する辞書 { pageNumber: [fields] }
+            currentPage: 1,            // 現在表示しているページ番号
+            totalPages: 0,             // PDFの総ページ数
+            selectedField: null,
+            currentTool: null,
+            pdfSize: { 
+                width: 0, 
+                height: 0, 
+                rotation: 0,    // ページの回転（度数）
+                offsetX: 0,     // X軸オフセット
+                offsetY: 0      // Y軸オフセット
+            },
+            pageSizes: {},             // ページごとのサイズを保存する辞書 { pageNumber: {width, height, rotation, offsetX, offsetY} }
+            zoomLevel: 1.0,
+            minZoom: 0.5,
+            maxZoom: 3.0,
+            mousePosition: { x: 0, y: 0 },
+            isLoading: false,         // 読み込み中フラグ（重複処理防止用）
+            showGrid: false,          // グリッド表示フラグ
+            gridSize: 20,             // グリッドサイズ（ピクセル）
+            coordinateSystem: {
+                // PDFの座標系は左下が原点(0,0)、右上が(width,height)
+                // キャンバスの座標系は左上が原点(0,0)、右下が(width,height)
+                canvasToPdf: function(x, y, pageNumber) {
+                    // 対象ページのサイズ情報を取得
+                    const pageSize = app.pageSizes[pageNumber] || app.pdfSize;
+                    
+                    // ズーム補正
+                    const realX = x / app.zoomLevel;
+                    const realY = y / app.zoomLevel;
+                    
+                    // 回転を考慮した座標変換
+                    let pdfX = realX;
+                    let pdfY = pageSize.height - realY; // Y軸の反転
+                    
+                    // ページの回転に応じた座標補正
+                    if (pageSize.rotation === 90) {
+                        const tempX = pdfX;
+                        pdfX = pdfY;
+                        pdfY = pageSize.width - tempX;
+                    } else if (pageSize.rotation === 180) {
+                        pdfX = pageSize.width - pdfX;
+                        pdfY = pageSize.height - pdfY;
+                    } else if (pageSize.rotation === 270) {
+                        const tempX = pdfX;
+                        pdfX = pageSize.height - pdfY;
+                        pdfY = tempX;
+                    }
+                    
+                    // オフセット補正
+                    pdfX += pageSize.offsetX;
+                    pdfY += pageSize.offsetY;
+                    
+                    return { x: pdfX, y: pdfY };
+                },
+                
+                pdfToCanvas: function(x, y, pageNumber) {
+                    // 対象ページのサイズ情報を取得
+                    const pageSize = app.pageSizes[pageNumber] || app.pdfSize;
+                    
+                    // オフセット補正
+                    let canvasX = x - pageSize.offsetX;
+                    let canvasY = y - pageSize.offsetY;
+                    
+                    // 回転を考慮した座標変換
+                    if (pageSize.rotation === 90) {
+                        const tempX = canvasX;
+                        canvasX = pageSize.width - canvasY;
+                        canvasY = tempX;
+                    } else if (pageSize.rotation === 180) {
+                        canvasX = pageSize.width - canvasX;
+                        canvasY = pageSize.height - canvasY;
+                    } else if (pageSize.rotation === 270) {
+                        const tempX = canvasX;
+                        canvasX = canvasY;
+                        canvasY = pageSize.height - tempX;
+                    }
+                    
+                    // Y軸の反転（PDFは左下原点、キャンバスは左上原点）
+                    canvasY = pageSize.height - canvasY;
+                    
+                    // ズーム補正
+                    canvasX *= app.zoomLevel;
+                    canvasY *= app.zoomLevel;
+                    
+                    return { x: canvasX, y: canvasY };
+                }
+            }
+        };
+        
+        // ライブラリの設定
+        if (typeof PDFLib !== 'undefined') {
+            const { PDFDocument, rgb, StandardFonts } = PDFLib;
+        }
+        
+        // エラーハンドリング用のグローバルエラーキャッチャー
+        window.addEventListener('error', function(e) {
+            console.error('グローバルエラー:', e.error);
+            showDetailedError('予期しないエラーが発生しました', e.error);
+        });
+        
+        // ページサイズの違いを検出する診断機能
+        function diagnosePdfPages() {
+            console.log('=== PDF各ページのサイズ診断 ===');
+            
+            const sizeReport = {};
+            let hasDifferentSizes = false;
+            let referenceWidth = null;
+            let referenceHeight = null;
+            
+            for (const pageNum in app.pageSizes) {
+                const size = app.pageSizes[pageNum];
+                sizeReport[pageNum] = {
+                    width: size.width,
+                    height: size.height,
+                    rotation: size.rotation || 0,
+                    aspectRatio: (size.width / size.height).toFixed(4)
+                };
+                
+                // 最初のページをリファレンスとする
+                if (referenceWidth === null) {
+                    referenceWidth = size.width;
+                    referenceHeight = size.height;
+                } 
+                // サイズの違いをチェック
+                else if (Math.abs(referenceWidth - size.width) > 0.5 || 
+                         Math.abs(referenceHeight - size.height) > 0.5) {
+                    hasDifferentSizes = true;
+                }
+            }
+            
+            console.log('ページサイズ情報:', sizeReport);
+            console.log('ページ間でサイズが異なる:', hasDifferentSizes);
+            
+            if (hasDifferentSizes) {
+                console.warn('警告: ページごとにサイズが異なるため、位置ずれが発生する可能性があります');
+            }
+            
+            return sizeReport;
+        }
+        
+        // 診断コンソールコマンドの追加
+        window.diagnoseApp = function() {
+            console.log('=== PDF編集アプリケーション診断 ===');
+            console.log('アプリケーション状態:', app);
+            console.log('ページ数:', app.totalPages);
+            console.log('現在のページ:', app.currentPage);
+            console.log('フィールド:', app.fields);
+            console.log('ライブラリ状態:');
+            console.log('- jQuery:', typeof $ !== 'undefined');
+            console.log('- Fabric.js:', typeof fabric !== 'undefined');
+            console.log('- PDF.js:', typeof pdfjsLib !== 'undefined');
+            console.log('- PDF-Lib:', typeof PDFLib !== 'undefined');
+            console.log('- FileSaver:', typeof saveAs !== 'undefined');
+            
+            // ページサイズ診断を追加
+            const pageSizeDiagnosis = diagnosePdfPages();
+            console.log('ページサイズ診断結果:', pageSizeDiagnosis);
+            
+            return 'アプリケーション診断が完了しました。詳細はコンソールを確認してください。';
+        };
+        
+        // ページ読み込み完了時
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('アプリケーション初期化...');
+            console.log('アプリケーション診断を実行するには、コンソールで window.diagnoseApp() を実行してください。');
+            
+            // イベントリスナーの設定
+            setupEventListeners();
+        });
+        
+        // イベントリスナーの設定
+        function setupEventListeners() {
+            console.log('イベントリスナーを設定中...');
+            
+            try {
+                // PDFアップロードボタン - jQuery依存性を減らす
+                document.getElementById('upload-btn').addEventListener('click', function() {
+                    document.getElementById('pdf-upload').click();
+                });
+                
+                // PDFファイル選択時
+                document.getElementById('pdf-upload').addEventListener('change', function(e) {
+                    if (e.target.files.length > 0) {
+                        const file = e.target.files[0];
+                        if (file.type === 'application/pdf') {
+                            handlePdfUpload(file);
+                        } else {
+                            showError('PDFファイルを選択してください。');
+                        }
+                    }
+                });
+                
+                // ツールボタン - jQueryを使用
+                $('.tool-button').on('click', function() {
+                    const tool = $(this).data('tool');
+                    setActiveTool(tool);
+                });
+                
+                // 削除ボタン
+                $('#delete-field-btn').on('click', deleteSelectedField);
+                
+                // グリッド表示切替ボタン
+                $('#toggle-grid-btn').on('click', toggleGrid);
+                
+                // PDF保存ボタン
+                $('#save-pdf-btn').on('click', savePdf);
+                
+                // データ保存・読み込みボタン
+                $('#save-data-btn').on('click', saveEditData);
+                $('#load-data-btn').on('click', loadEditData);
+                
+                // ページナビゲーション
+                $('#prev-page').on('click', goToPreviousPage);
+                $('#next-page').on('click', goToNextPage);
+                
+                // プロパティ変更
+                $('#field-text').on('input', updateFieldText);
+                $('#field-font-size').on('input', updateFieldFontSize);
+                $('#field-font-style').on('change', updateFieldFontStyle);
+                $('#field-x').on('change', updateFieldPosition);
+                $('#field-y').on('change', updateFieldPosition);
+                
+                // ズーム機能
+                $('#zoom-in').on('click', zoomIn);
+                $('#zoom-out').on('click', zoomOut);
+                
+                // ホイールでのズーム
+                $('.canvas-area').on('wheel', function(e) {
+                    if (e.originalEvent.ctrlKey) {
+                        e.preventDefault();
+                        if (e.originalEvent.deltaY < 0) {
+                            zoomIn();
+                        } else {
+                            zoomOut();
+                        }
+                    }
+                });
+                
+                // マウス移動時のツールチップと座標表示
+                $('.canvas-area').on('mousemove', function(e) {
+                    // ツールチップの更新
+                    if (app.currentTool) {
+                        app.mousePosition.x = e.pageX;
+                        app.mousePosition.y = e.pageY;
+                        
+                        $('#tooltip').css({
+                            left: e.pageX + 15,
+                            top: e.pageY + 15
+                        }).show();
+                    } else {
+                        $('#tooltip').hide();
+                    }
+                    
+                    // 座標表示の更新
+                    if (app.fabricCanvas) {
+                        const pointer = app.fabricCanvas.getPointer(e);
+                        const pdfCoords = app.coordinateSystem.canvasToPdf(
+                            pointer.x,
+                            pointer.y,
+                            app.currentPage
+                        );
+                        
+                        $('#position-info').text(
+                            `キャンバス座標: (${Math.round(pointer.x)}, ${Math.round(pointer.y)}) ` +
+                            `PDF座標: (${Math.round(pdfCoords.x)}, ${Math.round(pdfCoords.y)})`
+                        ).show();
+                    }
+                });
+                
+                // マウスが離れたらツールチップと座標表示を非表示
+                $('.canvas-area').on('mouseleave', function() {
+                    $('#tooltip').hide();
+                    $('#position-info').hide();
+                });
+                
+                console.log('イベントリスナー設定完了');
+            } catch (error) {
+                console.error('イベントリスナー設定エラー:', error);
+                showDetailedError('アプリケーションの初期化中にエラーが発生しました', error);
+            }
+        }
+        
+        // グリッド表示切替
+        function toggleGrid() {
+            app.showGrid = !app.showGrid;
+            
+            if (app.showGrid) {
+                createGrid();
+                $('#toggle-grid-btn').text('グリッド非表示');
+                $('#grid-overlay').show();
+            } else {
+                $('#toggle-grid-btn').text('グリッド表示');
+                $('#grid-overlay').hide();
+            }
+        }
+        
+        // グリッド作成
+        function createGrid() {
+            const gridOverlay = $('#grid-overlay');
+            gridOverlay.empty();
+            
+            if (!app.pdfSize.width || !app.pdfSize.height) return;
+            
+            const width = app.pdfSize.width * app.zoomLevel;
+            const height = app.pdfSize.height * app.zoomLevel;
+            const gridSize = app.gridSize * app.zoomLevel;
+            
+            // 横線
+            for (let y = gridSize; y < height; y += gridSize) {
+                const line = $('<div>').addClass('grid-line-h').css({
+                    top: y + 'px'
+                });
+                gridOverlay.append(line);
+            }
+            
+            // 縦線
+            for (let x = gridSize; x < width; x += gridSize) {
+                const line = $('<div>').addClass('grid-line-v').css({
+                    left: x + 'px'
+                });
+                gridOverlay.append(line);
+            }
+        }
+        
+        // 詳細なエラー表示
+        function showDetailedError(message, error) {
+            console.error(`エラー: ${message}`, error);
+            
+            // スタックトレースを取得
+            let details = '';
+            if (error && error.stack) {
+                details = '<br><br><small>デバッグ情報: ' + error.stack.split('\n')[0] + '</small>';
+            }
+            
+            $('#error-message').html(`<strong>エラー:</strong> ${message}${details}`).show();
+        }
+        
+        // エラー表示
+        function showError(message) {
+            $('#error-message').html(`<strong>エラー:</strong> ${message}`).show();
+            console.error('エラー: ' + message);
+        }
+        
+        // エラー非表示
+        function hideError() {
+            $('#error-message').hide();
+        }
+        
+        // ローディング表示
+        function showLoading() {
+            app.isLoading = true;
+            $('#loading-overlay').show();
+        }
+        
+        // ローディング非表示
+        function hideLoading() {
+            app.isLoading = false;
+            $('#loading-overlay').hide();
+        }
+        
+        // PDF取り込み処理
+        async function handlePdfUpload(file) {
+            // 重複処理防止
+            if (app.isLoading) return;
+            
+            showLoading();
+            hideError();
+            
+            console.log('PDFファイル読み込み中: ' + file.name);
+            $('#filename-display').text(file.name);
+            
+            try {
+                // PDFファイル保存
+                app.pdfFile = file;
+                
+                // PDF.jsでPDFを解析
+                const fileData = await readFileAsArrayBuffer(file);
+                if (!fileData) {
+                    throw new Error('ファイルの読み込みに失敗しました');
+                }
+                
+                console.log('PDFバッファ読み込み完了: ' + fileData.byteLength + ' バイト');
+                
+                // PDF.jsでPDFを解析
+                const loadingTask = pdfjsLib.getDocument({
+                    data: fileData,
+                    cMapUrl: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.4.120/cmaps/',
+                    cMapPacked: true
+                });
+                
+                // 読み込み待機
+                const pdf = await loadingTask.promise;
+                
+                console.log(`PDFの読み込み完了。ページ数: ${pdf.numPages}`);
+                app.pdfPages = pdf;
+                app.totalPages = pdf.numPages;
+                app.currentPage = 1;
+                app.fields = {};  // ページごとのフィールドを初期化
+                app.pageSizes = {};  // ページごとのサイズを初期化
+                
+                // アップロードメッセージを非表示にし、エディターを表示
+                $('#upload-message').hide();
+                $('.editor-wrapper').show();
+                
+                // 最初のページを読み込み
+                await loadPage(1);
+                
+                // 保存ボタンを有効化
+                $('#save-pdf-btn').prop('disabled', false);
+                $('#save-data-btn').prop('disabled', false);
+                $('#load-data-btn').prop('disabled', false);
+                
+                hideLoading();
+                
+            } catch (error) {
+                console.error('PDFの読み込みエラー: ', error);
+                showDetailedError('PDFの読み込みに失敗しました', error);
+                hideLoading();
+            }
+        }
+        
+        // ページ読み込み関数
+        async function loadPage(pageNumber) {
+            if (!app.pdfPages || pageNumber < 1 || pageNumber > app.totalPages) {
+                return;
+            }
+            
+            showLoading();
+            console.log(`ページ読み込み中: ${pageNumber}/${app.totalPages}`);
+            
+            try {
+                // 現在のページのフィールドを保存（現在のページが有効な場合）
+                if (app.fabricCanvas && app.currentPage >= 1 && app.currentPage <= app.totalPages) {
+                    console.log(`現在のページ ${app.currentPage} のフィールドを保存`);
+                    saveCurrentPageFields();
+                }
+                
+                // 現在のキャンバスのクリーンアップ
+                if (app.fabricCanvas) {
+                    console.log('既存のキャンバスをクリーンアップ中...');
+                    // 重要: メモリリーク防止のためにキャンバスを適切に破棄
+                    const oldCanvas = app.fabricCanvas;
+                    app.fabricCanvas = null;
+                    
+                    try {
+                        // オブジェクトの参照を削除
+                        oldCanvas.dispose();
+                    } catch (e) {
+                        console.warn('キャンバス破棄エラー:', e);
+                    }
+                }
+                
+                // 新しいページを取得
+                const page = await app.pdfPages.getPage(pageNumber);
+                const viewport = page.getViewport({ scale: 1.0 });
+                
+                // PDFのサイズを保存 - 正確なサイズを記録
+                app.pdfSize = {
+                    width: viewport.width,
+                    height: viewport.height,
+                    rotation: viewport.rotation || 0, // 回転情報も記録
+                    offsetX: viewport.offsetX || 0,   // オフセット情報も記録
+                    offsetY: viewport.offsetY || 0
+                };
+                
+                // ページサイズを記録
+                app.pageSizes[pageNumber] = {
+                    width: viewport.width,
+                    height: viewport.height,
+                    rotation: viewport.rotation || 0,
+                    offsetX: viewport.offsetX || 0,
+                    offsetY: viewport.offsetY || 0
+                };
+                
+                console.log(`ページ ${pageNumber} サイズ: ${viewport.width} x ${viewport.height}, 回転: ${viewport.rotation}°`);
+                
+                // 現在のページを更新
+                app.currentPage = pageNumber;
+                
+                // ズームレベルをリセット
+                setZoomLevel(1.0);
+                
+                // エディタのサイズを初期設定
+                updateEditorSize(true);
+                
+                // 一時キャンバスでPDFをレンダリング
+                const tempCanvas = document.createElement('canvas');
+                tempCanvas.width = viewport.width;
+                tempCanvas.height = viewport.height;
+                const tempContext = tempCanvas.getContext('2d');
+                
+                console.log('PDFをキャンバスにレンダリング中...');
+                
+                await page.render({
+                    canvasContext: tempContext,
+                    viewport: viewport
+                }).promise;
+                
+                console.log('PDFのレンダリング完了');
+                
+                // PDF表示エリアをクリア
+                const pdfDisplay = $('.pdf-display');
+                pdfDisplay.empty();
+                
+                // 画像として表示
+                const pdfImage = new Image();
+                pdfImage.src = tempCanvas.toDataURL('image/png');
+                pdfImage.id = 'pdf-image';
+                
+                // 画像のロード完了時
+                pdfImage.onload = function() {
+                    console.log('PDF画像のロード完了');
+                    
+                    // PDF表示を表示
+                    pdfDisplay.empty().show().append(pdfImage);
+                    
+                    // Fabricキャンバスの初期化
+                    initFabricCanvas();
+                    
+                    // このページのフィールドがあれば復元
+                    restorePageFields(pageNumber);
+                    
+                    // グリッドが有効なら再作成
+                    if (app.showGrid) {
+                        createGrid();
+                        $('#grid-overlay').show();
+                    }
+                    
+                    hideLoading();
+                };
+                
+                // 画像読み込みエラー時
+                pdfImage.onerror = function(e) {
+                    console.error('PDF画像の読み込みに失敗', e);
+                    showDetailedError('PDFの表示に失敗しました', new Error('画像変換エラー'));
+                    hideLoading();
+                };
+                
+                // メモリリーク防止
+                tempCanvas.width = 0;
+                tempCanvas.height = 0;
+                
+                // ページ表示を更新
+                updatePageDisplay();
+                
+            } catch (error) {
+                console.error(`ページ読み込みエラー (詳細): `, error);
+                showDetailedError(`ページ ${pageNumber} の読み込みに失敗しました`, error);
+                hideLoading();
+            }
+        }
+        
+        // 前のページへ移動
+        function goToPreviousPage() {
+            if (app.currentPage > 1) {
+                loadPage(app.currentPage - 1);
+            }
+        }
+        
+        // 次のページへ移動
+        function goToNextPage() {
+            if (app.currentPage < app.totalPages) {
+                loadPage(app.currentPage + 1);
+            }
+        }
+        
+        // ページ表示を更新
+        function updatePageDisplay() {
+            $('#page-display').text(`${app.currentPage} / ${app.totalPages}`);
+            
+            // ページナビゲーションボタンの有効/無効の設定
+            $('#prev-page').prop('disabled', app.currentPage <= 1);
+            $('#next-page').prop('disabled', app.currentPage >= app.totalPages || app.totalPages <= 1);
+        }
+        
+        // 現在のページのフィールドを保存
+        function saveCurrentPageFields() {
+            if (app.fabricCanvas) {
+                // キャンバス上のオブジェクトを取得
+                const canvasObjects = app.fabricCanvas.getObjects();
+                
+                // 新しいフィールドリストを作成
+                const updatedFields = [];
+                
+                for (const obj of canvasObjects) {
+                    if (obj.id && obj.type) {
+                        updatedFields.push({
+                            id: obj.id,
+                            type: obj.type,
+                            object: obj
+                        });
+                    }
+                }
+                
+                // 更新されたフィールドリストを保存
+                app.fields[app.currentPage] = updatedFields;
+                console.log(`ページ ${app.currentPage} のフィールドを保存: ${updatedFields.length}件`);
+            }
+        }
+        
+        // 指定されたページのフィールドを復元
+        function restorePageFields(pageNumber) {
+            if (!app.fabricCanvas) return;
+            
+            // キャンバスをクリア
+            app.fabricCanvas.clear();
+            
+            const pageFields = app.fields[pageNumber] || [];
+            console.log(`ページ ${pageNumber} のフィールドを復元: ${pageFields.length}件`);
+            
+            if (pageFields.length === 0) {
+                // フィールドリストを更新
+                updateFieldList();
+                return;
+            }
+            
+            // 各フィールドをキャンバスに追加
+            for (const field of pageFields) {
+                let obj;
+                
+                // オブジェクトがない場合（JSONから読み込んだデータ）
+                if (!field.object && field.data) {
+                    obj = field.data;
+                } else {
+                    obj = field.object;
+                }
+                
+                // オブジェクトがない場合はスキップ
+                if (!obj) continue;
+                
+                // Fabric.jsオブジェクトを復元
+                let fabricObj;
+                
+                try {
+                    switch (field.type) {
+                        case 'text':
+                            fabricObj = new fabric.IText(obj.text || 'テキスト', {
+                                left: obj.left,
+                                top: obj.top,
+                                fontSize: obj.fontSize || 14,
+                                fill: obj.fill || '#000000',
+                                fontFamily: obj.fontFamily || 'sans-serif',
+                                fontWeight: obj.fontWeight || 'normal',
+                                fontStyle: obj.fontStyle || 'normal',
+                                id: field.id,
+                                type: 'text'
+                            });
+                            break;
+                            
+                        case 'checkbox':
+                        case 'x-mark':
+                            const symbol = field.type === 'checkbox' ? '✓' : '✗';
+                            fabricObj = new fabric.Text(symbol, {
+                                left: obj.left,
+                                top: obj.top,
+                                fontSize: obj.fontSize || 20,
+                                fill: obj.fill || '#000000',
+                                fontFamily: obj.fontFamily || 'sans-serif',
+                                id: field.id,
+                                type: field.type
+                            });
+                            break;
+                            
+                        case 'dot':
+                            fabricObj = new fabric.Circle({
+                                left: obj.left,
+                                top: obj.top,
+                                radius: obj.radius || 5,
+                                fill: obj.fill || '#000000',
+                                id: field.id,
+                                type: 'dot'
+                            });
+                            break;
+                            
+                        case 'circle':
+                            fabricObj = new fabric.Circle({
+                                left: obj.left,
+                                top: obj.top,
+                                radius: obj.radius || 15,
+                                fill: obj.fill || 'transparent',
+                                stroke: obj.stroke || '#000000',
+                                strokeWidth: obj.strokeWidth || 2,
+                                id: field.id,
+                                type: 'circle'
+                            });
+                            break;
+                            
+                        case 'strikethrough':
+                            fabricObj = new fabric.Line(
+                                [obj.x1 || obj.left, 
+                                 obj.y1 || obj.top, 
+                                 obj.x2 || (obj.left + 50), 
+                                 obj.y2 || obj.top], 
+                                {
+                                    stroke: obj.stroke || '#000000',
+                                    strokeWidth: obj.strokeWidth || 2,
+                                    id: field.id,
+                                    type: 'strikethrough'
+                                }
+                            );
+                            break;
+                    }
+                    
+                    if (fabricObj) {
+                        app.fabricCanvas.add(fabricObj);
+                        field.object = fabricObj;  // 参照を更新
+                        
+                        // JSONデータは不要になったら削除
+                        delete field.data;
+                    }
+                } catch (error) {
+                    console.error(`フィールド復元エラー (${field.id}, ${field.type}):`, error);
+                }
+            }
+            
+            // フィールドリストを更新
+            updateFieldList();
+            
+            // キャンバスを再描画
+            app.fabricCanvas.renderAll();
+        }
+        
+        // ファイルをArrayBufferとして読み込む
+        function readFileAsArrayBuffer(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                
+                reader.onload = e => resolve(e.target.result);
+                
+                reader.onerror = e => {
+                    console.error('ファイル読み込みエラー:', e);
+                    reject(new Error('ファイル読み込みエラー: ' + (e.target.error?.message || '不明なエラー')));
+                };
+                
+                reader.readAsArrayBuffer(file);
+            });
+        }
+        
+        // ズーム関連の関数
+        function setZoomLevel(level) {
+            // 最小・最大ズームレベルの制限
+            level = Math.max(app.minZoom, Math.min(app.maxZoom, level));
+            
+            // ズームレベル更新
+            app.zoomLevel = level;
+            
+            // 表示を更新
+            $('#zoom-level').text(Math.round(level * 100) + '%');
+            
+            // エディタのサイズを更新
+            updateEditorSize();
+            
+            // グリッドが有効なら再作成
+            if (app.showGrid) {
+                createGrid();
+            }
+        }
+        
+        function zoomIn() {
+            setZoomLevel(app.zoomLevel + 0.1);
+        }
+        
+        function zoomOut() {
+            setZoomLevel(app.zoomLevel - 0.1);
+        }
+        
+        function updateEditorSize(isInitial = false) {
+            if (!app.pdfSize.width) return;
+            
+            // 拡大縮小後のサイズを計算
+            const zoomedWidth = app.pdfSize.width * app.zoomLevel;
+            const zoomedHeight = app.pdfSize.height * app.zoomLevel;
+            
+            // エディタラッパーのサイズを更新
+            $('.editor-wrapper').css({
+                width: zoomedWidth + 'px',
+                height: zoomedHeight + 'px'
+            });
+            
+            // Fabricキャンバスがある場合は更新
+            if (app.fabricCanvas) {
+                app.fabricCanvas.setWidth(zoomedWidth);
+                app.fabricCanvas.setHeight(zoomedHeight);
+                app.fabricCanvas.setZoom(app.zoomLevel);
+                app.fabricCanvas.renderAll();
+            }
+        }
+        
+        // Fabricキャンバスの初期化
+        function initFabricCanvas() {
+            console.log('Fabricキャンバスの初期化中...');
+            
+            // PDF表示エリア
+            const pdfDisplay = $('.pdf-display');
+            
+            // 既存のキャンバスがあれば削除
+            if (app.fabricCanvas) {
+                try {
+                    app.fabricCanvas.dispose();
+                } catch (e) {
+                    console.warn('キャンバス破棄エラー:', e);
+                }
+            }
+            
+            // 新しいキャンバス要素を作成
+            const canvasElement = $('<canvas>').attr('id', 'editor-canvas');
+            pdfDisplay.append(canvasElement);
+            
+            // ズーム適用後のサイズを計算
+            const zoomedWidth = app.pdfSize.width * app.zoomLevel;
+            const zoomedHeight = app.pdfSize.height * app.zoomLevel;
+            
+            try {
+                // Fabricキャンバスの初期化
+                app.fabricCanvas = new fabric.Canvas('editor-canvas', {
+                    width: zoomedWidth,
+                    height: zoomedHeight,
+                    selection: true,  // 複数選択を有効化
+                    preserveObjectStacking: true  // オブジェクトの重なり順を保持
+                });
+                
+                // キャンバスのサイズを設定
+                app.fabricCanvas.setWidth(zoomedWidth);
+                app.fabricCanvas.setHeight(zoomedHeight);
+                app.fabricCanvas.setZoom(app.zoomLevel);
+                
+                // イベントリスナを設定
+                app.fabricCanvas.on({
+                    'object:selected': onObjectSelected,
+                    'selection:cleared': onSelectionCleared,
+                    'mouse:dblclick': onCanvasDoubleClick,
+                    'mouse:move': onCanvasMouseMove
+                });
+                
+                console.log('Fabricキャンバスの初期化完了');
+                
+                // 初期化直後に一度レンダリング
+                app.fabricCanvas.renderAll();
+            } catch (error) {
+                console.error('Fabricキャンバス初期化エラー:', error);
+                showDetailedError('編集キャンバスの初期化に失敗しました', error);
+            }
+        }
+        
+        // アクティブツールの設定
+        function setActiveTool(tool) {
+            // 同じツールが再度クリックされた場合はツールをクリア
+            if (app.currentTool === tool) {
+                // 現在のツールを非アクティブに
+                $('.tool-button').removeClass('active');
+                app.currentTool = null;
+                $('.canvas-area').removeClass('placement-mode');
+                $('#placement-mode-notice').hide();
+                $('#tooltip').hide();
+                
+                if (app.fabricCanvas) {
+                    app.fabricCanvas.defaultCursor = 'default';
+                }
+                return;
+            }
+            
+            console.log('ツール選択: ' + tool);
+            
+            // 現在のツールを非アクティブに
+            $('.tool-button').removeClass('active');
+            
+            // 新しいツールをアクティブに
+            $(`.tool-button[data-tool="${tool}"]`).addClass('active');
+            
+            app.currentTool = tool;
+            
+            // 配置モード通知の表示
+            $('#placement-mode-notice').show();
+            
+            // マウスカーソル設定
+            if (app.fabricCanvas) {
+                app.fabricCanvas.defaultCursor = 'cell';
+                $('.canvas-area').addClass('placement-mode');
+            }
+        }
+        
+        // キャンバスマウス移動時のイベントハンドラ
+        function onCanvasMouseMove(options) {
+            if (app.currentTool) {
+                const pointer = app.fabricCanvas.getPointer(options.e);
+                app.mousePosition = { x: options.e.pageX, y: options.e.pageY };
+            }
+        }
+        
+        // キャンバスダブルクリック時のイベントハンドラ
+        function onCanvasDoubleClick(options) {
+            if (app.currentTool && options.e && !options.target) {
+                // ポインタ位置を正確に取得
+                const pointer = app.fabricCanvas.getPointer(options.e, true); // 精密な座標を取得
+                
+                console.log(`フィールド追加位置 (キャンバス精密座標): (${pointer.x}, ${pointer.y})`);
+                
+                // キャンバス座標をPDF座標に変換（現在のページ番号を指定）
+                const pdfCoords = app.coordinateSystem.canvasToPdf(
+                    pointer.x,
+                    pointer.y,
+                    app.currentPage
+                );
+                
+                console.log(`フィールド追加位置 (PDF座標): (${pdfCoords.x}, ${pdfCoords.y})`);
+                
+                addField(pointer);
+            }
+        }
+        
+        // フィールド追加
+        function addField(pointer) {
+            if (!app.currentTool || !app.fabricCanvas) return;
+            
+            // 一意のIDを生成
+            const fieldId = `field-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+            
+            let field;
+            
+            try {
+                switch (app.currentTool) {
+                    case 'text':
+                        field = new fabric.IText('テキストを入力', {
+                            left: pointer.x,
+                            top: pointer.y,
+                            fontSize: 14,
+                            fill: '#000000',
+                            fontFamily: 'sans-serif',
+                            id: fieldId,
+                            type: 'text'
+                        });
+                        break;
+                        
+                    case 'checkbox':
+                        field = new fabric.Text('✓', {
+                            left: pointer.x,
+                            top: pointer.y,
+                            fontSize: 20,
+                            fill: '#000000',
+                            fontFamily: 'sans-serif',
+                            id: fieldId,
+                            type: 'checkbox'
+                        });
+                        break;
+                        
+                    case 'x-mark':
+                        field = new fabric.Text('✗', {
+                            left: pointer.x,
+                            top: pointer.y,
+                            fontSize: 20,
+                            fill: '#000000',
+                            fontFamily: 'sans-serif',
+                            id: fieldId,
+                            type: 'x-mark'
+                        });
+                        break;
+                        
+                    case 'dot':
+                        field = new fabric.Circle({
+                            left: pointer.x - 5,
+                            top: pointer.y - 5,
+                            radius: 5,
+                            fill: '#000000',
+                            id: fieldId,
+                            type: 'dot'
+                        });
+                        break;
+                        
+                    case 'circle':
+                        field = new fabric.Circle({
+                            left: pointer.x - 15,
+                            top: pointer.y - 15,
+                            radius: 15,
+                            fill: 'transparent',
+                            stroke: '#000000',
+                            strokeWidth: 2,
+                            id: fieldId,
+                            type: 'circle'
+                        });
+                        break;
+                        
+                    case 'strikethrough':
+                        field = new fabric.Line([pointer.x, pointer.y, pointer.x + 50, pointer.y], {
+                            stroke: '#000000',
+                            strokeWidth: 2,
+                            id: fieldId,
+                            type: 'strikethrough'
+                        });
+                        break;
+                }
+                
+                if (field) {
+                    app.fabricCanvas.add(field);
+                    
+                    // 現在のページのフィールド配列を初期化（必要な場合）
+                    if (!app.fields[app.currentPage]) {
+                        app.fields[app.currentPage] = [];
+                    }
+                    
+                    // フィールドの参照を保持
+                    const fieldRef = {
+                        id: fieldId,
+                        type: app.currentTool,
+                        object: field
+                    };
+                    
+                    // フィールドを追加
+                    app.fields[app.currentPage].push(fieldRef);
+                    
+                    console.log(`フィールド追加: ${fieldId} (${app.currentTool}) - ページ ${app.currentPage}`);
+                    
+                    // フィールドを選択状態に
+                    app.fabricCanvas.setActiveObject(field);
+                    app.fabricCanvas.renderAll();
+                    
+                    // フィールドリスト更新
+                    updateFieldList();
+                    
+                    return fieldRef; // 参照を返す
+                }
+            } catch (error) {
+                console.error('フィールド追加エラー:', error);
+                showDetailedError('フィールドの追加に失敗しました', error);
+            }
+            
+            return null;
+        }
+        
+        // オブジェクト選択時
+        function onObjectSelected(e) {
+            try {
+                const selectedObject = e.target;
+                
+                if (!selectedObject || !selectedObject.id) {
+                    console.warn('選択されたオブジェクトにIDがありません');
+                    return;
+                }
+                
+                // 現在のページのフィールドから検索
+                const pageFields = app.fields[app.currentPage] || [];
+                app.selectedField = pageFields.find(f => f.id === selectedObject.id);
+                
+                if (app.selectedField) {
+                    console.log(`フィールド選択: ${app.selectedField.id} (${app.selectedField.type})`);
+                    showPropertiesPanel(app.selectedField);
+                    
+                    // 選択されたオブジェクトの位置をログ
+                    const obj = app.selectedField.object;
+                    console.log(`選択フィールド位置 (キャンバス): (${obj.left}, ${obj.top})`);
+                    
+                    // PDF座標に変換
+                    if (app.pdfSize && app.pdfSize.height) {
+                        const pdfCoords = app.coordinateSystem.canvasToPdf(
+                            obj.left,
+                            obj.top,
+                            app.currentPage
+                        );
+                        console.log(`選択フィールド位置 (PDF): (${pdfCoords.x}, ${pdfCoords.y})`);
+                    }
+                }
+            } catch (error) {
+                console.error('オブジェクト選択エラー:', error);
+            }
+        }
+        
+        // 選択解除時
+        function onSelectionCleared() {
+            app.selectedField = null;
+            hidePropertiesPanel();
+        }
+        
+        // 選択したフィールドの削除
+        function deleteSelectedField() {
+            if (app.selectedField && app.fabricCanvas) {
+                console.log(`フィールド削除: ${app.selectedField.id}`);
+                
+                try {
+                    // キャンバスからオブジェクトを削除
+                    app.fabricCanvas.remove(app.selectedField.object);
+                    
+                    // フィールドリストから削除 (現在のページのみ)
+                    if (app.fields[app.currentPage]) {
+                        app.fields[app.currentPage] = app.fields[app.currentPage].filter(
+                            f => f.id !== app.selectedField.id
+                        );
+                    }
+                    
+                    // 選択状態とプロパティパネルをクリア
+                    app.selectedField = null;
+                    hidePropertiesPanel();
+                    
+                    // フィールドリスト更新
+                    updateFieldList();
+                } catch (error) {
+                    console.error('フィールド削除エラー:', error);
+                    showDetailedError('フィールドの削除に失敗しました', error);
+                }
+            }
+        }
+        
+        // フィールドの直接削除
+        function deleteField(fieldId) {
+            // 現在のページのフィールドから検索
+            const pageFields = app.fields[app.currentPage] || [];
+            const fieldToDelete = pageFields.find(f => f.id === fieldId);
+            
+            if (fieldToDelete && app.fabricCanvas) {
+                console.log(`フィールド削除: ${fieldId}`);
+                
+                try {
+                    // キャンバスからオブジェクトを削除
+                    app.fabricCanvas.remove(fieldToDelete.object);
+                    
+                    // フィールドリストから削除 (現在のページのみ)
+                    app.fields[app.currentPage] = pageFields.filter(f => f.id !== fieldId);
+                    
+                    // 選択されているフィールドが削除対象だった場合
+                    if (app.selectedField && app.selectedField.id === fieldId) {
+                        app.selectedField = null;
+                        hidePropertiesPanel();
+                    }
+                    
+                    // フィールドリスト更新
+                    updateFieldList();
+                    
+                    // キャンバスを再描画
+                    app.fabricCanvas.renderAll();
+                } catch (error) {
+                    console.error('フィールド削除エラー:', error);
+                    showDetailedError('フィールドの削除に失敗しました', error);
+                }
+            }
+        }
+        
+        // フィールドリストの更新
+        function updateFieldList() {
+            try {
+                const fieldList = $('#field-list');
+                fieldList.empty();
+                
+                // 現在のページのフィールドを取得
+                const pageFields = app.fields[app.currentPage] || [];
+                
+                pageFields.forEach(field => {
+                    const fieldType = field.type.charAt(0).toUpperCase() + field.type.slice(1);
+                    const fieldItem = $(`
+                        <div class="field-item" data-id="${field.id}">
+                            <span>${fieldType}</span>
+                            <span class="field-delete" data-id="${field.id}">×</span>
+                        </div>
+                    `);
+                    
+                    // フィールド選択
+                    fieldItem.on('click', function(e) {
+                        if (!$(e.target).hasClass('field-delete')) {
+                            const fieldId = $(this).data('id');
+                            const fieldObj = pageFields.find(f => f.id === fieldId);
+                            
+                            if (fieldObj && fieldObj.object && app.fabricCanvas) {
+                                app.fabricCanvas.setActiveObject(fieldObj.object);
+                                app.fabricCanvas.renderAll();
+                            }
+                        }
+                    });
+                    
+                    // 個別の削除ボタン
+                    fieldItem.find('.field-delete').on('click', function(e) {
+                        e.stopPropagation();
+                        const fieldId = $(this).data('id');
+                        deleteField(fieldId);
+                    });
+                    
+                    fieldList.append(fieldItem);
+                });
+                
+                console.log(`フィールドリスト更新: ${pageFields.length}件 (ページ ${app.currentPage})`);
+            } catch (error) {
+                console.error('フィールドリスト更新エラー:', error);
+            }
+        }
+        
+        // プロパティパネル表示
+        function showPropertiesPanel(field) {
+            try {
+                const panel = $('#properties-panel');
+                panel.show();
+                
+                const obj = field.object;
+                
+                // フィールドタイプに応じたコントロール表示
+                if (field.type === 'text') {
+                    $('#text-properties').show();
+                    $('#field-text').val(obj.text);
+                    $('#field-font-size').val(obj.fontSize);
+                    
+                    let fontStyle = 'normal';
+                    if (obj.fontWeight === 'bold') {
+                        fontStyle = 'bold';
+                    } else if (obj.fontStyle === 'italic') {
+                        fontStyle = 'italic';
+                    }
+                    $('#field-font-style').val(fontStyle);
+                } else {
+                    $('#text-properties').hide();
+                }
+                
+                // 位置情報を表示
+                $('#field-x').val(Math.round(obj.left));
+                $('#field-y').val(Math.round(obj.top));
+                $('#position-controls').show();
+            } catch (error) {
+                console.error('プロパティパネル表示エラー:', error);
+            }
+        }
+        
+        // プロパティパネル非表示
+        function hidePropertiesPanel() {
+            $('#properties-panel').hide();
+        }
+        
+        // テキストフィールドのテキスト更新
+        function updateFieldText() {
+            if (app.selectedField && app.selectedField.type === 'text' && app.fabricCanvas) {
+                try {
+                    const newText = $('#field-text').val();
+                    app.selectedField.object.set('text', newText);
+                    app.fabricCanvas.renderAll();
+                } catch (error) {
+                    console.error('テキスト更新エラー:', error);
+                }
+            }
+        }
+        
+        // フォントサイズ更新
+        function updateFieldFontSize() {
+            if (app.selectedField && (app.selectedField.type === 'text' || 
+                app.selectedField.type === 'checkbox' || 
+                app.selectedField.type === 'x-mark') && app.fabricCanvas) {
+                try {
+                    const fontSize = parseInt($('#field-font-size').val(), 10);
+                    if (isNaN(fontSize) || fontSize < 8 || fontSize > 72) return;
+                    
+                    app.selectedField.object.set('fontSize', fontSize);
+                    app.fabricCanvas.renderAll();
+                } catch (error) {
+                    console.error('フォントサイズ更新エラー:', error);
+                }
+            }
+        }
+        
+        // フォントスタイル更新
+        function updateFieldFontStyle() {
+            if (app.selectedField && (app.selectedField.type === 'text' || 
+                app.selectedField.type === 'checkbox' || 
+                app.selectedField.type === 'x-mark') && app.fabricCanvas) {
+                try {
+                    const fontStyle = $('#field-font-style').val();
+                    
+                    // リセット
+                    app.selectedField.object.set({
+                        fontWeight: 'normal',
+                        fontStyle: 'normal'
+                    });
+                    
+                    // 選択されたスタイルを適用
+                    if (fontStyle === 'bold') {
+                        app.selectedField.object.set('fontWeight', 'bold');
+                    } else if (fontStyle === 'italic') {
+                        app.selectedField.object.set('fontStyle', 'italic');
+                    }
+                    
+                    app.fabricCanvas.renderAll();
+                } catch (error) {
+                    console.error('フォントスタイル更新エラー:', error);
+                }
+            }
+        }
+        
+        // フィールド位置更新
+        function updateFieldPosition() {
+            if (app.selectedField && app.fabricCanvas) {
+                try {
+                    const x = parseInt($('#field-x').val(), 10);
+                    const y = parseInt($('#field-y').val(), 10);
+                    
+                    if (!isNaN(x)) {
+                        app.selectedField.object.set('left', x);
+                    }
+                    
+                    if (!isNaN(y)) {
+                        app.selectedField.object.set('top', y);
+                    }
+                    
+                    app.fabricCanvas.renderAll();
+                    
+                    // PDF座標も計算して表示
+                    const pdfCoords = app.coordinateSystem.canvasToPdf(
+                        x,
+                        y,
+                        app.currentPage
+                    );
+                    console.log(`更新後のPDF座標: (${pdfCoords.x}, ${pdfCoords.y})`);
+                } catch (error) {
+                    console.error('位置更新エラー:', error);
+                }
+            }
+        }
+        
+        // PDF保存処理
+        async function savePdf() {
+            if (!app.pdfFile) {
+                showError('PDFが読み込まれていません。');
+                return;
+            }
+            
+            // 重複処理防止
+            if (app.isLoading) return;
+            
+            showLoading();
+            console.log('PDF保存処理開始');
+            
+            try {
+                // 現在のページのフィールドを保存
+                saveCurrentPageFields();
+                
+                // PDFファイルの読み込み
+                const fileData = await readFileAsArrayBuffer(app.pdfFile);
+                const pdfDoc = await PDFLib.PDFDocument.load(fileData, { ignoreEncryption: true });
+                
+                // フォントを埋め込む
+                const helveticaFont = await pdfDoc.embedFont(PDFLib.StandardFonts.Helvetica);
+                
+                // 全ページを処理
+                console.log(`全ページ処理開始: ${app.totalPages}ページ`);
+                
+                // 各ページを処理
+                for (let pageNumber = 1; pageNumber <= app.totalPages; pageNumber++) {
+                    const pageFields = app.fields[pageNumber] || [];
+                    if (pageFields.length === 0) {
+                        console.log(`ページ ${pageNumber}: フィールドなし - スキップ`);
+                        continue;
+                    }
+                    
+                    console.log(`ページ ${pageNumber} 処理開始: ${pageFields.length}件のフィールド`);
+                    
+                    // PDFのページを取得
+                    const pdfPage = pdfDoc.getPages()[pageNumber - 1];
+                    if (!pdfPage) {
+                        console.error(`ページ ${pageNumber} が見つかりません`);
+                        continue;
+                    }
+                    
+                    const { width, height } = pdfPage.getSize();
+                    
+                    console.log(`ページ ${pageNumber} サイズ: ${width} x ${height}`);
+                    
+                    // このページのフィールドを処理
+                    for (const field of pageFields) {
+                        const obj = field.object;
+                        
+                        if (!obj) {
+                            console.warn(`フィールド ${field.id} のオブジェクトがありません - スキップ`);
+                            continue;
+                        }
+                        
+                        try {
+                            // キャンバス座標をPDF座標に変換（ページ番号を明示的に指定）
+                            const pdfCoords = app.coordinateSystem.canvasToPdf(
+                                obj.left / app.zoomLevel,
+                                obj.top / app.zoomLevel,
+                                pageNumber
+                            );
+                            
+                            console.log(`フィールド処理 (ページ ${pageNumber}): ${field.type}, PDF座標: (${pdfCoords.x}, ${pdfCoords.y})`);
+                            
+                            // フィールドの位置データ
+                            const fieldData = {
+                                type: field.type,
+                                left: pdfCoords.x,
+                                top: pdfCoords.y,
+                                text: obj.text,
+                                fontSize: obj.fontSize,
+                                fontWeight: obj.fontWeight,
+                                fontStyle: obj.fontStyle,
+                                radius: obj.radius ? obj.radius / app.zoomLevel : undefined,
+                                x1: obj.x1 ? obj.x1 / app.zoomLevel : undefined,
+                                y1: obj.y1 ? obj.y1 / app.zoomLevel : undefined,
+                                x2: obj.x2 ? obj.x2 / app.zoomLevel : undefined,
+                                y2: obj.y2 ? obj.y2 / app.zoomLevel : undefined
+                            };
+                            
+                            await processField(fieldData, pdfPage, pdfDoc, pageNumber);
+                        } catch (fieldError) {
+                            console.error(`フィールド処理エラー: ${fieldError.message}`, fieldError);
+                        }
+                    }
+                }
+                
+                // 保存してダウンロード
+                console.log('PDF生成中...');
+                const pdfBytes = await pdfDoc.save();
+                const outputFilename = app.pdfFile.name.replace(/\.pdf$/i, '_filled.pdf');
+                
+                saveAs(new Blob([pdfBytes], { type: 'application/pdf' }), outputFilename);
+                
+                console.log(`PDF保存完了: ${outputFilename}`);
+                hideLoading();
+                
+            } catch (error) {
+                console.error(`PDF保存エラー:`, error);
+                showDetailedError('PDFの保存中にエラーが発生しました', error);
+                hideLoading();
+            }
+        }
+        
+        // フィールド処理
+        async function processField(field, pdfPage, pdfDoc, pageNumber) {
+            // キャンバスを作成
+            const tempCanvas = document.createElement('canvas');
+            const tempContext = tempCanvas.getContext('2d');
+            
+            console.log(`フィールド処理: ${field.type}, PDF座標: (${field.left}, ${field.top})`);
+            
+            try {
+                // フィールドタイプに応じた処理
+                switch (field.type) {
+                    case 'text':
+                        // フォントの設定
+                        const fontWeight = field.fontWeight === 'bold' ? 'bold ' : '';
+                        const fontStyle = field.fontStyle === 'italic' ? 'italic ' : '';
+                        const fontSize = field.fontSize;
+                        
+                        // テキストの幅を計算
+                        tempContext.font = `${fontWeight}${fontStyle}${fontSize}px sans-serif`;
+                        const textWidth = tempContext.measureText(field.text).width;
+                        
+                        // キャンバスサイズ設定
+                        const padding = 2;
+                        tempCanvas.width = textWidth + (padding * 2);
+                        tempCanvas.height = fontSize * 1.2;
+                        
+                        // 透明背景
+                        tempContext.clearRect(0, 0, tempCanvas.width, tempCanvas.height);
+                        
+                        // フォント再設定
+                        tempContext.font = `${fontWeight}${fontStyle}${fontSize}px sans-serif`;
+                        tempContext.fillStyle = 'black';
+                        tempContext.fillText(field.text, padding, fontSize);
+                        
+                        // 画像として埋め込み
+                        const imgData = tempCanvas.toDataURL('image/png');
+                        const textImage = await pdfDoc.embedPng(imgData);
+                        
+                        // PDF座標での描画位置
+                        pdfPage.drawImage(textImage, {
+                            x: field.left,
+                            y: field.top - fontSize, // テキストの上端に合わせる
+                            width: tempCanvas.width,
+                            height: tempCanvas.height
+                        });
+                        
+                        break;
+                    
+                    case 'checkbox':
+                    case 'x-mark':
+                        const symbol = field.type === 'checkbox' ? '✓' : '✗';
+                        const size = field.fontSize * 1.2;
+                        
+                        tempCanvas.width = size;
+                        tempCanvas.height = size;
+                        
+                        tempContext.clearRect(0, 0, size, size);
+                        tempContext.font = `${field.fontSize}px sans-serif`;
+                        tempContext.fillStyle = 'black';
+                        tempContext.textAlign = 'center';
+                        tempContext.textBaseline = 'middle';
+                        tempContext.fillText(symbol, size/2, size/2);
+                        
+                        const markImgData = tempCanvas.toDataURL('image/png');
+                        const markImage = await pdfDoc.embedPng(markImgData);
+                        
+                        pdfPage.drawImage(markImage, {
+                            x: field.left - (size / 2),
+                            y: field.top - size,
+                            width: size,
+                            height: size
+                        });
+                        
+                        break;
+                    
+                    case 'dot':
+                        const dotSize = field.radius * 2.5;
+                        
+                        tempCanvas.width = dotSize;
+                        tempCanvas.height = dotSize;
+                        
+                        tempContext.clearRect(0, 0, dotSize, dotSize);
+                        tempContext.beginPath();
+                        tempContext.arc(dotSize/2, dotSize/2, field.radius, 0, Math.PI * 2);
+                        tempContext.fillStyle = 'black';
+                        tempContext.fill();
+                        
+                        const dotImgData = tempCanvas.toDataURL('image/png');
+                        const dotImage = await pdfDoc.embedPng(dotImgData);
+                        
+                        pdfPage.drawImage(dotImage, {
+                            x: field.left - (dotSize / 2),
+                            y: field.top - dotSize,
+                            width: dotSize,
+                            height: dotSize
+                        });
+                        
+                        break;
+                    
+                    case 'circle':
+                        const circleSize = field.radius * 2.5;
+                        
+                        tempCanvas.width = circleSize;
+                        tempCanvas.height = circleSize;
+                        
+                        tempContext.clearRect(0, 0, circleSize, circleSize);
+                        tempContext.beginPath();
+                        tempContext.arc(circleSize/2, circleSize/2, field.radius, 0, Math.PI * 2);
+                        tempContext.strokeStyle = 'black';
+                        tempContext.lineWidth = 2;
+                        tempContext.stroke();
+                        
+                        const circleImgData = tempCanvas.toDataURL('image/png');
+                        const circleImage = await pdfDoc.embedPng(circleImgData);
+                        
+                        pdfPage.drawImage(circleImage, {
+                            x: field.left - (circleSize / 2),
+                            y: field.top - circleSize,
+                            width: circleSize,
+                            height: circleSize
+                        });
+                        
+                        break;
+                    
+                    case 'strikethrough':
+                        const lineWidth = 50;
+                        const lineHeight = 10;
+                        
+                        tempCanvas.width = lineWidth;
+                        tempCanvas.height = lineHeight;
+                        
+                        tempContext.clearRect(0, 0, lineWidth, lineHeight);
+                        tempContext.beginPath();
+                        tempContext.moveTo(5, lineHeight/2);
+                        tempContext.lineTo(lineWidth - 5, lineHeight/2);
+                        tempContext.strokeStyle = 'black';
+                        tempContext.lineWidth = 2;
+                        tempContext.stroke();
+                        
+                        const lineImgData = tempCanvas.toDataURL('image/png');
+                        const lineImage = await pdfDoc.embedPng(lineImgData);
+                        
+                        pdfPage.drawImage(lineImage, {
+                            x: field.left,
+                            y: field.top - (lineHeight / 2),
+                            width: lineWidth,
+                            height: lineHeight
+                        });
+                        
+                        break;
+                }
+            } catch (error) {
+                throw new Error(`フィールド処理中のエラー (${field.type}): ${error.message}`);
+            } finally {
+                // メモリリーク防止
+                tempCanvas.width = 0;
+                tempCanvas.height = 0;
+            }
+        }
+        
+        // 編集データのJSON形式保存機能
+        function saveEditData() {
+            if (!app.pdfFile) {
+                showError('PDFが読み込まれていません。');
+                return;
+            }
+            
+            // 重複処理防止
+            if (app.isLoading) return;
+            
+            try {
+                // 現在のページのフィールドを保存
+                saveCurrentPageFields();
+                
+                // 保存するデータの作成
+                const editData = {
+                    pdfName: app.pdfFile.name,
+                    totalPages: app.totalPages,
+                    pageSizes: app.pageSizes,
+                    fields: {}
+                };
+                
+                // 各ページのフィールド情報をシリアライズ
+                for (const pageNumber in app.fields) {
+                    const pageFields = app.fields[pageNumber];
+                    if (!pageFields || pageFields.length === 0) continue;
+                    
+                    // シリアライズ可能なデータのみを保存
+                    editData.fields[pageNumber] = pageFields.map(field => {
+                        const obj = field.object;
+                        if (!obj) return null;
+                        
+                        // 基本情報のみを保存（循環参照を避ける）
+                        const serializedField = {
+                            id: field.id,
+                            type: field.type,
+                            left: obj.left,
+                            top: obj.top
+                        };
+                        
+                        // フィールドタイプに応じた追加情報
+                        switch (field.type) {
+                            case 'text':
+                                serializedField.text = obj.text;
+                                serializedField.fontSize = obj.fontSize;
+                                serializedField.fontWeight = obj.fontWeight;
+                                serializedField.fontStyle = obj.fontStyle;
+                                serializedField.fontFamily = obj.fontFamily;
+                                serializedField.fill = obj.fill;
+                                break;
+                                
+                            case 'checkbox':
+                            case 'x-mark':
+                                serializedField.fontSize = obj.fontSize;
+                                serializedField.fontFamily = obj.fontFamily;
+                                serializedField.fill = obj.fill;
+                                break;
+                                
+                            case 'dot':
+                            case 'circle':
+                                serializedField.radius = obj.radius;
+                                serializedField.fill = obj.fill;
+                                if (field.type === 'circle') {
+                                    serializedField.stroke = obj.stroke;
+                                    serializedField.strokeWidth = obj.strokeWidth;
+                                }
+                                break;
+                                
+                            case 'strikethrough':
+                                serializedField.x1 = obj.x1;
+                                serializedField.y1 = obj.y1;
+                                serializedField.x2 = obj.x2;
+                                serializedField.y2 = obj.y2;
+                                serializedField.stroke = obj.stroke;
+                                serializedField.strokeWidth = obj.strokeWidth;
+                                break;
+                        }
+                        
+                        return serializedField;
+                    }).filter(Boolean); // nullエントリを削除
+                }
+                
+                // JSONに変換してダウンロード
+                const jsonData = JSON.stringify(editData, null, 2);
+                const filename = app.pdfFile.name.replace(/\.pdf$/i, '_editdata.json');
+                const blob = new Blob([jsonData], { type: 'application/json' });
+                saveAs(blob, filename);
+                
+                console.log(`編集データを保存: ${filename}`);
+            } catch (error) {
+                console.error('データ保存エラー:', error);
+                showDetailedError('編集データの保存に失敗しました', error);
+            }
+        }
+        
+        // JSON形式データの読み込み機能
+        function loadEditData() {
+            if (!app.pdfFile) {
+                showError('先にPDFをアップロードしてください。');
+                return;
+            }
+            
+            // 重複処理防止
+            if (app.isLoading) return;
+            
+            // ファイル選択ダイアログを表示
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.accept = 'application/json';
+            
+            input.onchange = async (e) => {
+                if (e.target.files.length > 0) {
+                    const file = e.target.files[0];
+                    
+                    try {
+                        showLoading();
+                        
+                        // JSONファイルを読み込む
+                        const reader = new FileReader();
+                        reader.onload = async (event) => {
+                            try {
+                                // JSONデータを解析
+                                const editData = JSON.parse(event.target.result);
+                                
+                                // PDFファイル名チェック
+                                if (editData.pdfName !== app.pdfFile.name) {
+                                    const confirmed = confirm(
+                                        `編集データは「${editData.pdfName}」用ですが、現在読み込まれているPDFは「${app.pdfFile.name}」です。\n` +
+                                        `それでも読み込みますか？`
+                                    );
+                                    
+                                    if (!confirmed) {
+                                        hideLoading();
+                                        return;
+                                    }
+                                }
+                                
+                                // 編集データを適用
+                                await applyEditData(editData);
+                                
+                                hideLoading();
+                            } catch (error) {
+                                console.error('JSONデータの解析エラー:', error);
+                                showDetailedError('編集データの読み込みに失敗しました', error);
+                                hideLoading();
+                            }
+                        };
+                        
+                        reader.onerror = (e) => {
+                            console.error('ファイル読み込みエラー:', e);
+                            showDetailedError('ファイルの読み込みに失敗しました', e.target.error);
+                            hideLoading();
+                        };
+                        
+                        reader.readAsText(file);
+                        
+                    } catch (error) {
+                        console.error('編集データ読み込みエラー:', error);
+                        showDetailedError('編集データの読み込みに失敗しました', error);
+                        hideLoading();
+                    }
+                }
+            };
+            
+            input.click();
+        }
+        
+        // 編集データを適用する関数
+        async function applyEditData(editData) {
+            console.log('編集データを適用中...');
+            
+            try {
+                // 現在のフィールドをクリア
+                app.fields = {};
+                
+                // ページサイズ情報の復元
+                if (editData.pageSizes) {
+                    app.pageSizes = editData.pageSizes;
+                }
+                
+                // 各ページのフィールドデータを適用
+                for (const pageNumber in editData.fields) {
+                    const pageFields = editData.fields[pageNumber];
+                    if (!pageFields || pageFields.length === 0) continue;
+                    
+                    const parsedPageNumber = parseInt(pageNumber, 10);
+                    
+                    // ページフィールド配列を初期化
+                    app.fields[parsedPageNumber] = [];
+                    
+                    // 各フィールドを処理
+                    for (const fieldData of pageFields) {
+                        // 新しいフィールドオブジェクトを作成
+                        const field = {
+                            id: fieldData.id || `field-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+                            type: fieldData.type,
+                            data: fieldData // Fabric.jsオブジェクト生成用のデータを保存
+                        };
+                        
+                        // フィールドを追加
+                        app.fields[parsedPageNumber].push(field);
+                    }
+                    
+                    console.log(`ページ ${pageNumber} に ${pageFields.length} 件のフィールドをロード`);
+                }
+                
+                // 現在表示中のページを再読み込み
+                if (app.currentPage > app.totalPages) {
+                    app.currentPage = 1;
+                }
+                
+                await loadPage(app.currentPage);
+                
+                console.log('編集データの適用完了');
+            } catch (error) {
+                console.error('編集データ適用エラー:', error);
+                throw error; // 呼び出し元でエラーハンドリングするためにスロー
+            }
+        }
+    </script>
+</body>
+</html>
